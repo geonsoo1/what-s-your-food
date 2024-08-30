@@ -13,6 +13,7 @@ st.set_page_config(
     page_icon="🍽",
     layout="centered",
 )
+
 # Streamlit 제목 설정
 st.title("Show your Food!!")
 
@@ -154,74 +155,61 @@ if api_key:
                     }
                 ],
                 "max_tokens": 500,
-                "temperature": 0.5  # 정밀도를 높이고 창의성을 줄이기 위한 temperature 설정
+                "temperature": 0.4  # 정밀도를 높이고 창의성을 줄이기 위한 temperature 설정
             }
 
             response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
 
             if response.status_code == 200:
-                result = response.json()
-                st.write(result['choices'][0]['message']['content'])
+                first_result = response.json() # 첫번재 응답을 세션에 저장
+                st.write(first_result['choices'][0]['message']['content'])
 
-
+                #첫번째 응답을 세션 상태 messages에 추가
+                st.session_state.messages.append({"role": "assistant", "content": first_result['choices'][0]['message']['content']})
+                
                 # 추가 질문 옵션 추가
                 st.markdown("### 추가 질문이 있나요?")
-                additional_question = st.text_input("추가 질문을 입력하세요:")
+                # Form for additional question submission
+                with st.form(key="additional_question_form"):
+                    additional_question = st.text_input("추가 질문을 입력하세요:", key="additional_question_input")
+                    # Submit button for the form
+                    submit_button = st.form_submit_button(label="질문 보내기")
 
-                if st.button("추가 질문 보내기"):
-                    if uploaded_file is not None:
-                        base64_image = encode_image(image)  # 이미지를 base64로 인코딩
-                        
-                        st.session_state.messages.append({
-                            "role": "user", 
-                            "content": additional_question
-                        })
-                        
-                        st.write("질문이 제출되었습니다. 잠시만 기다려주세요...")
+                    if submit_button and additional_question:
+                        if uploaded_file is not None:
+                            base64_image = encode_image(image)  # 이미지를 base64로 인코딩
 
+                            st.session_state.messages.append({
+                                "role": "user",
+                                "content": additional_question
+                            })
 
+                            st.write("질문이 제출되었습니다. 잠시만 기다려주세요...")
+                            # 추가 질문을 OpenAI API로 보내고 응답 처리
+                            payload = {
+                                "model": st.session_state["openai_model"],
+                                "messages": st.session_state.messages,
+                                "temperature": 0.4  # 정밀도를 높이고 창의성을 줄이기 위한 temperature 설정
+                            }
+                            #print(payload)
 
-                    
+                            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
 
-                        # 추가 질문을 OpenAI API로 보내고 응답 처리
-                        payload = {
-                            "model": st.session_state["openai_model"],
-                            "messages": st.session_state.messages + [
-                                {
-                                    "role": "user",
-                                    "content": [
-                                        {
-                                            "type": "text",
-                                            "text": additional_question
-                                        },
-                                        {
-                                            "type": "image_url",
-                                            "image_url": {
-                                                "url": f"data:image/jpeg;base64,{base64_image}"
-                                            }
-                                        }
-                                    ]
-                                }
-                            ],
-                            "temperature": 0.2  # 정밀도를 높이고 창의성을 줄이기 위한 temperature 설정
-                        }
-
-                        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-
-                        if response.status_code == 200:
-                            result = response.json()
-                            st.write(result['choices'][0]['message']['content'])
-                            st.session_state.messages.append({"role": "assistant", "content": result['choices'][0]['message']['content']})
+                            if response.status_code == 200:
+                                additional_result = response.json()
+                                st.write(additional_result['choices'][0]['message']['content'])
+                                st.session_state.messages.append({"role": "assistant", "content": additional_result['choices'][0]['message']['content']})
+                            else:
+                                st.error("추가 질문에 대한 OpenAI API 호출에 실패했습니다.")
+                                st.error(f"상태 코드: {response.status_code}, 응답: {response.text}")
                         else:
-                            st.error("추가 질문에 대한 OpenAI API 호출에 실패했습니다.")
-                            st.error(f"상태 코드: {response.status_code}, 응답: {response.text}")
-                    else:
-                        st.warning("이미지 없이 추가 질문을 보낼 수 없습니다. 먼저 이미지를 업로드하세요.")
+                            st.warning("이미지 없이 추가 질문을 보낼 수 없습니다. 먼저 이미지를 업로드하세요.")
+
                 # 피드백 기능 추가
                 st.markdown("### 이 응답이 도움이 되었나요?")
-                feedback = st.radio("응답에 대한 피드백을 선택하세요", ["도움이 되었어요", "더 개선이 필요해요"], index=None)
+                feedback = st.radio("응답에 대한 피드백을 선택하세요", ["도움이 되었어요", "더 개선이 필요해요(다음)"], index=None)
 
-                if feedback == "더 개선이 필요해요":
+                if feedback == "더 개선이 필요해요(다음)":
                     feedback_text = st.text_area("어떤 부분을 개선하면 좋을지 알려주세요:")
                     if st.button("피드백 제출"):
                         # 피드백을 파일에 저장
@@ -231,7 +219,7 @@ if api_key:
                             f.write("-" * 40 + "\n")
                         st.success("피드백이 제출되었습니다. 감사합니다!")
                     else:
-                        st.warning("피드백 내용을 입력해주세요.")
+                        st.warning("피드백 내용을 입력해주세요.건수와 신혁이가 볼 수 있으니 욕은 하지말아주세요 ^^")
                 elif feedback == "도움이 되었어요":
                     st.success("""감사합니다! 식사 맛있게하세요🍽️\n
                                This program was created by La-sinhyeok & Park geonsoo""")
@@ -246,40 +234,5 @@ if api_key:
         except Exception as e:
             st.error("이미지 처리에 실패했습니다. 다른 이미지를 업로드해 주세요.")
             st.error(f"오류 내용: {e}")
-
-    for message in st.session_state.messages:
-        if message["role"] not in ["system", "assistant", "user"]:  # 사용자 메시지만 표시
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-    if prompt := st.chat_input("채팅을 계속하세요..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        with st.chat_message("assistant"):
-            # OpenAI API 호출 (기본 텍스트만 처리)
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
-
-            payload = {
-                "model": st.session_state["openai_model"],
-                "messages": [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.messages
-                ],
-                "temperature": 0.2  # 정밀도를 높이고 창의성을 줄이기 위한 temperature 설정
-            }
-
-            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-
-            if response.status_code == 200:
-                result = response.json()
-                st.write(result['choices'][0]['message']['content'])
-                st.session_state.messages.append({"role": "assistant", "content": result['choices'][0]['message']['content']})
-            else:
-                st.error("OpenAI API 호출에 실패했습니다.")
-                st.error(f"상태 코드: {response.status_code}, 응답: {response.text}")
 else:
     st.warning("API Key를 입력하세요.")
